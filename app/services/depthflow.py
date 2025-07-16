@@ -41,6 +41,43 @@ class DepthFlowService:
             bool: 是否成功
         """
         try:
+            # 處理圖片方向（修復 Portrait 模式旋轉問題）
+            try:
+                from PIL import Image
+                # 開啟圖片並檢查 EXIF 方向
+                with Image.open(input_path) as img:
+                    # 讀取 EXIF 方向資訊
+                    try:
+                        exif = img._getexif()
+                        if exif is not None:
+                            # EXIF Orientation tag = 274 (0x112)
+                            orientation = exif.get(274)
+                            if orientation:
+                                # 根據 EXIF 方向旋轉圖片
+                                rotated = False
+                                if orientation == 3:
+                                    img = img.rotate(180, expand=True)
+                                    rotated = True
+                                elif orientation == 6:
+                                    # Portrait 模式 - 需要旋轉 270 度（順時針）
+                                    img = img.rotate(270, expand=True)
+                                    rotated = True
+                                elif orientation == 8:
+                                    # Portrait 模式（反向）- 需要旋轉 90 度（順時針）
+                                    img = img.rotate(90, expand=True)
+                                    rotated = True
+                                
+                                if rotated:
+                                    # 保存修正後的圖片
+                                    temp_path = input_path.replace('.jpg', '_oriented.jpg').replace('.jpeg', '_oriented.jpeg')
+                                    img.save(temp_path, 'JPEG', quality=95)
+                                    input_path = temp_path  # 使用修正後的圖片
+                                    logger.info(f"圖片方向已修正: EXIF Orientation = {orientation}")
+                    except Exception as e:
+                        logger.warning(f"讀取 EXIF 方向資訊失敗: {e}")
+            except Exception as e:
+                logger.warning(f"圖片方向處理失敗，使用原圖: {e}")
+            
             # 使用 DepthFlow 的 Python API
             try:
                 from depthflow.scene import DepthScene
@@ -130,6 +167,14 @@ class DepthFlowService:
         except Exception as e:
             logger.error(f"DepthFlow 處理失敗: {e}")
             return False
+        finally:
+            # 清理暫存的旋轉圖片
+            if '_oriented.jpg' in input_path or '_oriented.jpeg' in input_path:
+                try:
+                    os.remove(input_path)
+                    logger.info(f"已清理暫存圖片: {input_path}")
+                except Exception as e:
+                    logger.warning(f"清理暫存圖片失敗: {e}")
     
     async def _process_with_cli(
         self, 
