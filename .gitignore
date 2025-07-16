@@ -99,7 +99,7 @@ docker/volumes/
 
 # DepthFlow cache and models
 .cache/
-models/
+/models/  # Only exclude models directory at root level, not app/models/
 
 # Test files (if any)
 test_*.jpg
