@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # Redis 服務
+  redis:
+    image: redis:7-alpine
+    container_name: depthflow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - depthflow-network
+
+  # FastAPI 應用
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: depthflow-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ../storage:/app/storage
+      - ../.env:/app/.env
+    depends_on:
+      - redis
+    networks:
+      - depthflow-network
+    # 如果有 GPU，加入以下配置
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Celery Worker
+  celery-worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: depthflow-celery-worker
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ../storage:/app/storage
+      - ../.env:/app/.env
+    depends_on:
+      - redis
+      - api
+    networks:
+      - depthflow-network
+    # 如果有 GPU，加入以下配置
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Celery Beat（定時任務，可選）
+  celery-beat:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: depthflow-celery-beat
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app beat --loglevel=info
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ../.env:/app/.env
+    depends_on:
+      - redis
+    networks:
+      - depthflow-network
+
+  # Flower（Celery 監控，可選）
+  flower:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: depthflow-flower
+    restart: unless-stopped
+    command: celery -A app.tasks.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - celery-worker
+    networks:
+      - depthflow-network
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  depthflow-network:
+    driver: bridge
