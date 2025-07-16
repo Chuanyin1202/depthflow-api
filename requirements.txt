@@ -8,7 +8,7 @@ starlette>=0.40.0
 
 # DepthFlow
 depthflow==0.9.1
-torch  # 如果有 GPU，可改為 torch+cu118 或適合的版本
+torch>=2.0.0  # PyTorch for deep learning models
 
 # Async task queue
 celery==5.3.6

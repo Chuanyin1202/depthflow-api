@@ -16,7 +16,7 @@
 
 ### 環境需求
 
-- Python 3.11+
+- Python 3.11+ (建議 3.12)
 - Redis 6.0+
 - GPU（建議，用於加速處理）
 - FFmpeg（用於影片處理）
@@ -29,23 +29,30 @@ git clone <your-repo-url>
 cd depthflow-api
 ```
 
-2. 安裝依賴
+2. 建立虛擬環境
+```bash
+python3 -m venv venv
+source venv/bin/activate  # Linux/macOS
+# 或 venv\Scripts\activate  # Windows
+```
+
+3. 安裝依賴
 ```bash
 pip install -r requirements.txt
 ```
 
-3. 設定環境變數
+4. 設定環境變數
 ```bash
 cp .env.example .env
 # 編輯 .env 檔案，設定必要的參數
 ```
 
-4. 啟動 Redis
+5. 啟動 Redis
 ```bash
 redis-server
 ```
 
-5. 執行服務
+6. 執行服務
 ```bash
 python -m app.main
 ```
