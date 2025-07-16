@@ -14,6 +14,8 @@ from app.models.schemas import (
 )
 from app.api.dependencies import verify_api_key, validate_file_extension
 from app.services.file_handler import FileHandler
+from app.services.gpu_resource_manager import get_gpu_manager
+from app.services.monitoring import get_monitoring_service
 from app.tasks.processing import process_image_task
 
 logger = logging.getLogger(__name__)
@@ -70,19 +72,44 @@ async def process_image(
             ).model_dump()
         )
     
-    # 檢查檔案大小
+    # 檢查檔案大小（串流方式，避免記憶體炸彈）
     file_size = 0
-    contents = await file.read()
-    file_size = len(contents)
-    await file.seek(0)  # 重置檔案指標
+    chunk_size = 8192  # 8KB chunks
     
-    if file_size > settings.max_upload_size:
+    # 重置檔案指標到開頭
+    await file.seek(0)
+    
+    # 串流讀取檔案並計算大小
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        file_size += len(chunk)
+        # 提早檢查大小限制，避免繼續讀取大檔案
+        if file_size > settings.max_upload_size:
+            raise HTTPException(
+                status_code=400,
+                detail=ErrorResponse(
+                    error="file_too_large",
+                    message=f"檔案大小超過限制 ({settings.max_upload_size / 1024 / 1024:.1f} MB)",
+                    detail={"file_size": file_size}
+                ).model_dump()
+            )
+    
+    # 重置檔案指標到開頭，供後續使用
+    await file.seek(0)
+    
+    # 檢查是否可以處理新任務（併發限制和 GPU 資源）
+    gpu_manager = await get_gpu_manager()
+    can_process = await gpu_manager.can_process_task()
+    
+    if not can_process["can_process"]:
         raise HTTPException(
-            status_code=400,
+            status_code=503,
             detail=ErrorResponse(
-                error="file_too_large",
-                message=f"檔案大小超過限制 ({settings.max_upload_size / 1024 / 1024:.1f} MB)",
-                detail={"file_size": file_size}
+                error="service_busy",
+                message=f"服務器繁忙: {can_process['reason']}",
+                detail=can_process
             ).model_dump()
         )
     
@@ -114,7 +141,10 @@ async def process_image(
         "message": "任務已建立，等待處理",
         "parameters": process_request.parameters,
         "file_path": file_path,
-        "webhook_url": process_request.webhook_url
+        "webhook_url": process_request.webhook_url,
+        "retry_count": 0,
+        "max_retries": 3,
+        "retry_history": []
     }
     tasks_db[task_id] = task
     
@@ -234,25 +264,21 @@ async def get_system_status(
     active_tasks = sum(1 for task in tasks_db.values() if task["status"] == "processing")
     queue_length = sum(1 for task in tasks_db.values() if task["status"] == "pending")
     
-    # GPU 狀態（簡化版本，實際應該使用 nvidia-ml-py 或類似工具）
-    gpu_available = False
-    gpu_memory_used = None
-    
-    try:
-        import torch
-        gpu_available = torch.cuda.is_available()
-        if gpu_available:
-            gpu_memory_used = (torch.cuda.memory_allocated() / torch.cuda.max_memory_allocated()) * 100
-    except ImportError:
-        pass
+    # 取得 GPU 狀態（使用 GPU 資源管理器）
+    gpu_manager = await get_gpu_manager()
+    gpu_status = await gpu_manager.check_gpu_memory()
+    gpu_stats = gpu_manager.get_stats()
     
     return SystemStatus(
-        gpu_available=gpu_available,
-        gpu_memory_used=gpu_memory_used,
+        gpu_available=gpu_status.get("available", False),
+        gpu_memory_used=gpu_status.get("memory_percent", 0),
         cpu_percent=cpu_percent,
         memory_percent=memory.percent,
         queue_length=queue_length,
-        active_tasks=active_tasks
+        active_tasks=gpu_stats["active_tasks"],
+        max_concurrent_tasks=gpu_stats["max_concurrent_tasks"],
+        gpu_temperature=gpu_status.get("temperature"),
+        gpu_utilization=gpu_status.get("utilization")
     )
 
 
@@ -337,3 +363,33 @@ async def cancel_task(
     task["message"] = "任務已取消"
     
     return {"message": "任務已成功取消", "task_id": task_id}
+
+
+@router.get("/monitoring/metrics")
+async def get_monitoring_metrics(
+    api_key: Optional[str] = Depends(verify_api_key)
+):
+    """取得監控指標"""
+    monitoring_service = get_monitoring_service()
+    return monitoring_service.get_metrics_summary()
+
+
+@router.get("/monitoring/errors")
+async def get_error_report(
+    hours: int = 24,
+    api_key: Optional[str] = Depends(verify_api_key)
+):
+    """取得錯誤報告"""
+    monitoring_service = get_monitoring_service()
+    return monitoring_service.get_error_report(hours)
+
+
+@router.post("/monitoring/cleanup")
+async def cleanup_monitoring_data(
+    days: int = 7,
+    api_key: Optional[str] = Depends(verify_api_key)
+):
+    """清理監控數據"""
+    monitoring_service = get_monitoring_service()
+    monitoring_service.clear_old_data(days)
+    return {"message": f"已清理 {days} 天前的監控數據"}

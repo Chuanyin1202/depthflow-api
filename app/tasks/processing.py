@@ -5,10 +5,61 @@ import asyncio
 
 from app.services.depthflow import DepthFlowService
 from app.services.file_handler import FileHandler
+from app.services.gpu_resource_manager import get_gpu_manager
+from app.services.monitoring import get_monitoring_service, performance_monitor
 
 logger = logging.getLogger(__name__)
 
 
+def should_retry_error(error: Exception) -> bool:
+    """
+    判斷錯誤是否應該重試
+    
+    Args:
+        error: 發生的錯誤
+        
+    Returns:
+        bool: 是否應該重試
+    """
+    error_str = str(error).lower()
+    
+    # 不應該重試的錯誤類型
+    non_retryable_errors = [
+        "無效的圖片檔案",
+        "檔案格式不支援",
+        "檔案損壞",
+        "parameter_validation_error",
+        "invalid_file_format",
+        "file_too_large"
+    ]
+    
+    # 檢查是否為不可重試的錯誤
+    for non_retryable in non_retryable_errors:
+        if non_retryable in error_str:
+            return False
+    
+    # 應該重試的錯誤類型
+    retryable_errors = [
+        "gpu",
+        "memory",
+        "timeout",
+        "connection",
+        "temporary",
+        "資源不足",
+        "服務器忙碌",
+        "processing failed"
+    ]
+    
+    # 檢查是否為可重試的錯誤
+    for retryable in retryable_errors:
+        if retryable in error_str:
+            return True
+    
+    # 預設情況下，大多數錯誤都可以重試
+    return True
+
+
+@performance_monitor("image_processing")
 async def process_image_task(
     task_id: str,
     file_path: str,
@@ -35,6 +86,12 @@ async def process_image_task(
     # 初始化服務
     depthflow_service = DepthFlowService()
     file_handler = FileHandler()
+    gpu_manager = await get_gpu_manager()
+    monitoring_service = get_monitoring_service()
+    
+    # 記錄任務開始
+    task_start_time = datetime.utcnow()
+    monitoring_service.record_metric("task_started_count", 1, {"task_id": task_id})
     
     try:
         # 更新為處理中
@@ -58,13 +115,22 @@ async def process_image_task(
         output_format = parameters.get('output_format', 'mp4')
         output_path = file_handler.get_output_path(task_id, output_format)
         
-        # 處理圖片
-        success = await depthflow_service.process_image(
-            input_path=file_path,
-            output_path=output_path,
-            parameters=parameters,
-            progress_callback=update_progress
-        )
+        # 檢查 GPU 資源並取得處理槽位
+        task['message'] = '等待 GPU 資源...'
+        await update_progress(10, '等待 GPU 資源...')
+        
+        # 使用 GPU 資源管理器取得槽位
+        async with gpu_manager.acquire_gpu_slot(task_id):
+            task['message'] = '開始 GPU 處理...'
+            await update_progress(20, '開始 GPU 處理...')
+            
+            # 處理圖片
+            success = await depthflow_service.process_image(
+                input_path=file_path,
+                output_path=output_path,
+                parameters=parameters,
+                progress_callback=update_progress
+            )
         
         if success:
             # 更新為完成
@@ -74,15 +140,19 @@ async def process_image_task(
             task['result_path'] = output_path
             task['updated_at'] = datetime.utcnow()
             
+            # 計算處理時間
+            processing_time = (task['updated_at'] - task_start_time).total_seconds()
+            
             # 取得檔案資訊
             file_info = file_handler.get_file_info(output_path)
             if file_info:
                 task['metadata'] = {
                     'output_size': file_info['size'],
-                    'processing_time': (
-                        task['updated_at'] - task['created_at']
-                    ).total_seconds()
+                    'processing_time': processing_time
                 }
+            
+            # 記錄成功完成
+            monitoring_service.record_task_completed(task_id, processing_time)
             
             logger.info(f"任務完成: {task_id}")
             
@@ -95,14 +165,63 @@ async def process_image_task(
     except Exception as e:
         logger.error(f"任務失敗: {task_id}, 錯誤: {e}")
         
-        # 更新為失敗
-        task['status'] = 'failed'
-        task['message'] = '處理失敗'
-        task['error_message'] = str(e)
-        task['updated_at'] = datetime.utcnow()
+        # 記錄錯誤到監控服務
+        monitoring_service.record_error(e, task_id, {
+            "operation": "image_processing",
+            "file_path": file_path,
+            "parameters": parameters
+        })
         
-        # 清理檔案
-        file_handler.cleanup_task_files(task_id)
+        # 檢查是否應該重試
+        retry_count = task.get('retry_count', 0)
+        max_retries = task.get('max_retries', 3)
+        
+        if retry_count < max_retries and should_retry_error(e):
+            # 準備重試
+            retry_count += 1
+            task['retry_count'] = retry_count
+            task['status'] = 'pending'
+            task['message'] = f'處理失敗，準備重試 ({retry_count}/{max_retries})'
+            task['updated_at'] = datetime.utcnow()
+            
+            # 記錄重試歷史
+            if 'retry_history' not in task:
+                task['retry_history'] = []
+            task['retry_history'].append({
+                'attempt': retry_count,
+                'error': str(e),
+                'timestamp': datetime.utcnow().isoformat()
+            })
+            
+            # 記錄重試到監控服務
+            monitoring_service.record_task_retry(task_id, retry_count)
+            
+            # 計算重試延遲（指數退避）
+            delay = min(60 * (2 ** (retry_count - 1)), 300)  # 最多 5 分鐘
+            logger.info(f"任務 {task_id} 將在 {delay} 秒後重試")
+            
+            # 清理 GPU 記憶體
+            try:
+                await gpu_manager.cleanup_gpu_memory()
+            except:
+                pass
+            
+            # 安排重試
+            await asyncio.sleep(delay)
+            await process_image_task(task_id, file_path, parameters, tasks_db)
+            return
+        else:
+            # 已達重試上限或不可重試的錯誤
+            task['status'] = 'failed'
+            task['message'] = '處理失敗'
+            task['error_message'] = str(e)
+            task['updated_at'] = datetime.utcnow()
+            
+            # 記錄最終失敗
+            monitoring_service.record_metric("task_failed_count", 1, {"task_id": task_id})
+            
+            # 清理檔案
+            file_handler.cleanup_task_files(task_id)
 
 
 async def send_webhook_notification(task: Dict[str, Any]):

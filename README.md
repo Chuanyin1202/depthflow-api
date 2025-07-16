@@ -17,7 +17,6 @@
 ### 環境需求
 
 - Python 3.11+ (建議 3.12)
-- Redis 6.0+
 - GPU（建議，用於加速處理）
 - FFmpeg（用於影片處理）
 
@@ -47,12 +46,7 @@ cp .env.example .env
 # 編輯 .env 檔案，設定必要的參數
 ```
 
-5. 啟動 Redis
-```bash
-redis-server
-```
-
-6. 執行服務
+5. 執行服務
 ```bash
 python -m app.main
 ```
@@ -69,7 +63,6 @@ docker-compose up -d
 服務將在以下端口啟動：
 - API 服務：http://localhost:8080
 - API 文檔：http://localhost:8080/docs
-- Flower 監控：http://localhost:5555（可選）
 
 ## API 使用說明
 
@@ -178,8 +171,8 @@ deploy:
 ### 擴展性
 
 - 使用 Kubernetes 進行水平擴展
-- 配置多個 Celery Worker 處理更多並發任務
 - 使用 S3 或其他物件儲存服務儲存結果檔案
+- 配置負載均衡器分散請求
 
 ## 故障排除
 
@@ -199,14 +192,6 @@ pip install depthflow
 nvidia-smi
 ```
 
-### Redis 連接失敗
-
-確保 Redis 服務正在執行：
-
-```bash
-redis-cli ping
-```
-
 ## 授權
 
 本專案基於 MIT 授權條款開源。
@@ -219,4 +204,3 @@ redis-cli ping
 
 - [DepthFlow 官方專案](https://github.com/BrokenSource/DepthFlow)
 - [FastAPI 文檔](https://fastapi.tiangolo.com/)
-- [Celery 文檔](https://docs.celeryproject.org/)

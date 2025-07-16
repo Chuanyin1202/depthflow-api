@@ -122,20 +122,26 @@ class SystemStatus(BaseModel):
     """系統狀態模型"""
     gpu_available: bool = Field(..., description="GPU 是否可用")
     gpu_memory_used: Optional[float] = Field(default=None, description="GPU 記憶體使用率")
+    gpu_temperature: Optional[float] = Field(default=None, description="GPU 溫度")
+    gpu_utilization: Optional[float] = Field(default=None, description="GPU 利用率")
     cpu_percent: float = Field(..., description="CPU 使用率")
     memory_percent: float = Field(..., description="記憶體使用率")
     queue_length: int = Field(..., description="任務隊列長度")
     active_tasks: int = Field(..., description="進行中的任務數")
+    max_concurrent_tasks: Optional[int] = Field(default=None, description="最大併發任務數")
     
     class Config:
         json_schema_extra = {
             "example": {
                 "gpu_available": True,
                 "gpu_memory_used": 45.2,
+                "gpu_temperature": 65.0,
+                "gpu_utilization": 78.5,
                 "cpu_percent": 23.5,
                 "memory_percent": 67.8,
                 "queue_length": 5,
-                "active_tasks": 2
+                "active_tasks": 2,
+                "max_concurrent_tasks": 3
             }
         }
 
