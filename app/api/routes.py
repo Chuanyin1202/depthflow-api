@@ -235,7 +235,11 @@ async def download_result(
         )
     
     # 根據輸出格式設定 MIME 類型
-    output_format = task.get("parameters", {}).get("output_format", "mp4")
+    parameters = task.get("parameters")
+    if parameters and hasattr(parameters, 'output_format'):
+        output_format = parameters.output_format
+    else:
+        output_format = "mp4"
     media_type = {
         "mp4": "video/mp4",
         "webm": "video/webm",
