@@ -130,9 +130,10 @@ class DepthFlowService:
                 fps = parameters.get('fps', self.default_fps)
                 duration = parameters.get('animation_duration', self.default_duration)
                 resolution = parameters.get('resolution')
+                ssaa_multiplier = parameters.get('ssaa_multiplier', 1.5)
                 
                 if resolution:
-                    scene.ssaa = 1.5  # 超採樣抗鋸齒
+                    scene.ssaa = ssaa_multiplier  # 使用傳入的超採樣抗鋸齒參數
                 
                 # 設定編碼器
                 output_format = parameters.get('output_format', 'mp4')
@@ -201,10 +202,11 @@ class DepthFlowService:
                 "--fps", str(parameters.get('fps', self.default_fps)),
             ]
             
-            # 設定解析度
+            # 設定解析度和 SSAA
             resolution = parameters.get('resolution')
+            ssaa_multiplier = parameters.get('ssaa_multiplier', 1.5)
             if resolution:
-                cmd.extend(["--ssaa", "1.5"])
+                cmd.extend(["--ssaa", str(ssaa_multiplier)])
             
             # 添加動畫類型（基於之前的範例代碼）
             camera_movement = parameters.get('camera_movement', 'orbit')

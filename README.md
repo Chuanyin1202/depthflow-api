@@ -12,15 +12,40 @@
 - 🐳 Docker 容器化部署
 - 📝 自動生成 API 文檔
 
-## 快速開始
+## 部署方案
 
-### 環境需求
+### 方案一：Google Colab 部署（免費 GPU）
+
+使用 Google Colab 免費 GPU 資源快速部署：
+
+1. 打開 [colab-deployment/DepthFlow_Server.ipynb](./colab-deployment/DepthFlow_Server.ipynb)
+2. 在 Google Colab 中執行所有程式碼儲存格
+3. 獲得公網 URL 後即可使用 API
+
+詳細說明請參考 [Colab 部署指南](./colab-deployment/README.md)
+
+### 方案二：Docker 部署（推薦生產環境）
+
+使用 Docker Compose 一鍵部署：
+
+```bash
+cd docker
+docker-compose up -d
+```
+
+服務將在以下端口啟動：
+- API 服務：http://localhost:8080
+- API 文檔：http://localhost:8080/docs
+
+### 方案三：本地開發安裝
+
+#### 環境需求
 
 - Python 3.11+ (建議 3.12)
 - GPU（建議，用於加速處理）
 - FFmpeg（用於影片處理）
 
-### 本地安裝
+#### 安裝步驟
 
 1. 克隆專案
 ```bash
@@ -50,19 +75,6 @@ cp .env.example .env
 ```bash
 python -m app.main
 ```
-
-### Docker 部署
-
-使用 Docker Compose 一鍵部署：
-
-```bash
-cd docker
-docker-compose up -d
-```
-
-服務將在以下端口啟動：
-- API 服務：http://localhost:8080
-- API 文檔：http://localhost:8080/docs
 
 ## API 使用說明
 
@@ -141,15 +153,16 @@ curl -X GET "http://localhost:8080/api/v1/result/{task_id}" \
 ```
 depthflow-api/
 ├── app/
-│   ├── api/          # API 路由和端點
-│   ├── models/       # 資料模型
-│   ├── services/     # 商業邏輯服務
-│   ├── tasks/        # 非同步任務
-│   └── utils/        # 工具函數
-├── storage/          # 檔案儲存
-├── docker/           # Docker 配置
-├── tests/            # 測試檔案
-└── requirements.txt  # Python 依賴
+│   ├── api/              # API 路由和端點
+│   ├── models/           # 資料模型
+│   ├── services/         # 商業邏輯服務
+│   ├── tasks/            # 非同步任務
+│   └── utils/            # 工具函數
+├── storage/              # 檔案儲存
+├── docker/               # Docker 配置
+├── colab-deployment/     # Google Colab 部署方案
+├── tests/                # 測試檔案
+└── requirements.txt      # Python 依賴
 ```
 
 ## 進階配置
